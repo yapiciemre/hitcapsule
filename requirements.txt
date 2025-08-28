@@ -3,3 +3,7 @@ spotipy
 requests
 python-dotenv
 tenacity
+
+streamlit
+Pillow
+qrcode
