@@ -1,0 +1,5 @@
+beautifulsoup4
+spotipy
+requests
+python-dotenv
+tenacity
