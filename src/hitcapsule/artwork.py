@@ -4,15 +4,19 @@ from PIL import Image, ImageDraw, ImageFont
 import qrcode
 import os
 
-# ————— Font (basit fallback) —————
+# ---- Typo-safe font helper -------------------------------------------------
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Try a system TTF; fall back to PIL default."""
     try:
+        # Arial çoğu Windows'ta var; yoksa fallback'e düşer
         return ImageFont.truetype("arial.ttf", size)
     except Exception:
         return ImageFont.load_default()
 
-# ————— Yardımcılar —————
-def _text_ellipsize(d: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_w: int) -> str:
+def _text_ellipsize(
+    d: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_w: int
+) -> str:
+    """Fit text into max_w with … using binary search."""
     if d.textlength(text, font=font) <= max_w:
         return text
     lo, hi = 0, len(text)
@@ -25,78 +29,110 @@ def _text_ellipsize(d: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont
             hi = mid
     return (text[:max(lo - 1, 0)] + "…") if text else ""
 
-# ————— COVER 640x640 —————
-def make_cover(date_text: str, save_path: str, playlist_name: Optional[str] = None) -> str:
-    """Kapak: 640x640, koyu zemin, büyük tarih, opsiyonel playlist adı."""
+# Marka rengi: Spotify yeşili
+BRAND = (29, 185, 84)
+FG     = (255, 255, 255)
+SUBFG  = (210, 210, 210)
+MUTED  = (180, 180, 180)
+BG     = (28, 28, 28)
+
+# ---------------- COVER ----------------
+def make_cover(
+    date_text: str,
+    save_path: str,
+    playlist_name: Optional[str] = None,
+) -> str:
+    """640x640 kapak. Üstte playlist adı, altında tarih; sol altta etiketler."""
     W, H = 640, 640
-    img = Image.new("RGB", (W, H), (28, 28, 28))
+    img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
 
-    # Kenarlık
-    d.rounded_rectangle((24, 24, W-24, H-24), radius=28, outline=(255, 255, 255), width=3)
+    # Çerçeve
+    d.rounded_rectangle((24, 24, W - 24, H - 24), radius=28, outline=FG, width=3)
 
-    # Üst sol
-    d.text((40, 60), "HitCapsule", font=_font(48), fill=(255, 255, 255))
-    d.text((40, 120), date_text,     font=_font(36), fill=(230, 230, 230))
+    # Üst başlıklar
+    x0, y0 = 40, 56
+    title_f = _font(52)
+    date_f = _font(36)
 
-    # Playlist adı (varsa)
-    if playlist_name:
-        d.text((40, 168), f"Playlist: {playlist_name}", font=_font(24), fill=(210, 210, 210))
+    name = playlist_name or "HitCapsule"
+    name = _text_ellipsize(d, name, title_f, W - x0 - 40)
+    d.text((x0, y0), name, font=title_f, fill=FG)
+    d.text((x0, y0 + 64), date_text, font=date_f, fill=SUBFG)
 
-    # Alt sol
-    d.text((40, H-90), "Billboard Hot 100",       font=_font(24), fill=(200, 200, 200))
-    d.text((40, H-60), "generated with hitcapsule", font=_font(18), fill=(160, 160, 160))
+    # Sol alt etiketler
+    base_y = H - 92
+    d.text((40, base_y), "Billboard Hot 100", font=_font(24), fill=MUTED)
+
+    # "generated with " + HitCapsule (renkli)
+    gen = "generated with "
+    gx = 40
+    gy = H - 60
+    d.text((gx, gy), gen, font=_font(18), fill=(160, 160, 160))
+    gx += int(d.textlength(gen, font=_font(18)))
+    d.text((gx, gy), "HitCapsule", font=_font(18), fill=BRAND)
 
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     img.save(save_path, "JPEG", quality=92)
     return save_path
 
-# ————— POSTER 1080x1920 —————
+# ---------------- POSTER ----------------
 def make_story_poster(
     date_text: str,
     songs: List[Tuple[str, str]],
     playlist_url: str,
     save_path: str,
     playlist_name: Optional[str] = None,
-    top_k: int = 8,
+    top_k: int = 10,
+    subtitle: Optional[str] = None,
 ) -> str:
     """
-    Poster: 1080x1920, başlık+ tarih + Billboard, ilk N şarkı (default 8) + QR.
-    - Uzun başlık/sanatçı isimleri tek satıra sığdırılır (ellipsis).
-    - Sağ alttaki QR için güvenli alan ayrılır.
+    1080x1920 story posteri.
+    Üstten aşağı: Playlist adı → (opsiyonel alt başlık) → Tarih → Top-N şarkı → sağ altta QR.
+    Sol altta: Billboard Hot 100 + generated with HitCapsule.
     """
     W, H = 1080, 1920
-    img = Image.new("RGB", (W, H), (24, 24, 24))
+    img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
 
-    # Başlık bloğu
-    x0 = 60
-    d.text((x0, 80),  "HitCapsule",        font=_font(72), fill=(255, 255, 255))
-    d.text((x0, 170), date_text,           font=_font(54), fill=(230, 230, 230))
-    d.text((x0, 240), "Billboard Hot 100", font=_font(36), fill=(200, 200, 200))
-    if playlist_name:
-        d.text((x0, 290), f"Playlist: {playlist_name}", font=_font(32), fill=(210, 210, 210))
+    # Üst başlıklar
+    x0, y0 = 60, 72
+    name_f = _font(72)
+    sub_f  = _font(34)
+    date_f = _font(50)
 
-    # Liste alanı
-    list_start_y = 340 if not playlist_name else 380
-    row_h        = 110  # 8 şarkı için uygun satır yüksekliği
-    title_f      = _font(42)
-    artist_f     = _font(28)
+    name = playlist_name or "HitCapsule"
+    name = _text_ellipsize(d, name, name_f, W - x0 - 60)
+    d.text((x0, y0), name, font=name_f, fill=FG)
 
-    # Sağ altta QR için güvenli alan bırak (genişliği azalt)
+    y = y0 + 78
+    if subtitle:
+        sub = _text_ellipsize(d, subtitle, sub_f, W - x0 - 60)
+        d.text((x0, y), sub, font=sub_f, fill=(200, 200, 200))
+        y += 44
+
+    d.text((x0, y), date_text, font=date_f, fill=SUBFG)
+    head_bottom = y + 64
+
+    # Şarkı listesi
+    list_start = head_bottom + 24
+    row_h   = 96
+    title_f = _font(40)
+    artist_f = _font(26)
+
+    # Sağ altta QR için güvenli alan
     qr_target = 360
-    right_safe = qr_target + 100  # sağdan güvenli alan
+    right_safe = qr_target + 100
     max_w = W - x0 - right_safe
 
-    # İlk N şarkı
     for i, (title, artist) in enumerate(songs[:top_k], start=1):
-        y = list_start_y + (i-1) * row_h
+        yy = list_start + (i - 1) * row_h
         t = _text_ellipsize(d, f"{i}. {title}", title_f, max_w)
-        a = _text_ellipsize(d, f"{artist}",    artist_f, max_w)
-        d.text((x0, y),   t, font=title_f,  fill=(255, 255, 255))
-        d.text((x0, y+44), a, font=artist_f, fill=(200, 200, 200))
+        a = _text_ellipsize(d, f"{artist}", artist_f, max_w)
+        d.text((x0, yy), t, font=title_f, fill=FG)
+        d.text((x0, yy + 42), a, font=artist_f, fill=MUTED)
 
-    # QR
+    # QR + üstünde etiket (sağ altta)
     qr = qrcode.QRCode(border=2, box_size=8)
     qr.add_data(playlist_url)
     qr.make(fit=True)
@@ -105,10 +141,24 @@ def make_story_poster(
 
     qr_x = W - qr_target - 60
     qr_y = H - qr_target - 60
+    # Etiket: QR'ın hemen üstünde ortalanmış
+    label = "Scan to open on Spotify"
+    label_f = _font(28)
+    tw = int(d.textlength(label, font=label_f))
+    lx = qr_x + (qr_target - tw) // 2
+    ly = qr_y - 36
+    d.text((lx, ly), label, font=label_f, fill=MUTED)
+
     img.paste(qr_img, (qr_x, qr_y))
 
-    # Alt sol bilgilendirme
-    d.text((60, H-100), "Scan to open on Spotify", font=_font(28), fill=(200, 200, 200))
+    # Sol alt etiketler
+    d.text((60, H - 92), "Billboard Hot 100", font=_font(24), fill=MUTED)
+    gen = "generated with "
+    gx = 60
+    gy = H - 60
+    d.text((gx, gy), gen, font=_font(18), fill=(160, 160, 160))
+    gx += int(d.textlength(gen, font=_font(18)))
+    d.text((gx, gy), "HitCapsule", font=_font(18), fill=BRAND)
 
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     img.save(save_path, "PNG")

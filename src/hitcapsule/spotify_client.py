@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterable, Optional, List
+from typing import Iterable, Optional, List, Tuple
 import logging
 import os
 import time
@@ -54,7 +54,6 @@ def _title_candidates(want_title: str) -> List[str]:
 
 # ----------------------------------------------------------------------
 
-
 class SpotifyClient:
     def __init__(self, market: Optional[str] = None, enable_cover_upload: bool = False) -> None:
         load_dotenv()
@@ -87,13 +86,13 @@ class SpotifyClient:
         )
 
         # Market: parametre > ENV > "US"
-        self.market = (market or os.getenv("SPOTIFY_MARKET") or "US") or None
+        self.market = (market or os.getenv("SPOTIFY_MARKET") or "US").upper()
 
         me = self.sp.current_user()
         self.user_id = me["id"]
         logger.info("Authenticated as %s", me.get("display_name", self.user_id))
 
-    # ------------------------------- Playlist -------------------------------
+    # ------------------------------- Playlist helpers -------------------------------
 
     def create_playlist(self, name: str, public: bool = False, description: str = "") -> str:
         playlist = self.sp.user_playlist_create(user=self.user_id, name=name, public=public, description=description)
@@ -114,6 +113,14 @@ class SpotifyClient:
         if batch:
             self.sp.playlist_add_items(playlist_id=playlist_id, items=batch)
 
+    def replace_items(self, playlist_id: str, uris: List[str]) -> None:
+        """Tüm içeriği uris ile değiştir (ilk 100 replace, kalanı append)."""
+        first = uris[:100]
+        rest  = uris[100:]
+        self.sp.playlist_replace_items(playlist_id, first)
+        if rest:
+            self.add_items_chunked(playlist_id, rest, chunk=100)
+
     def upload_cover_image(self, playlist_id: str, image_path: str) -> bool:
         """JPEG'yi base64 string olarak yükler. Scope yoksa False döner."""
         try:
@@ -125,6 +132,56 @@ class SpotifyClient:
             logger.warning("Cover upload failed: %s", e)
             return False
 
+    def _iter_my_playlists(self, limit: int = 50):
+        """Kullanıcının tüm playlist’lerini sayfalar halinde getir."""
+        offset = 0
+        while True:
+            page = self.sp.current_user_playlists(limit=limit, offset=offset)
+            items = page.get("items", [])
+            if not items:
+                break
+            for it in items:
+                yield it
+            offset += len(items)
+            if offset >= page.get("total", 0):
+                break
+
+    def find_playlist_by_name(self, name: str) -> Optional[Tuple[str, dict]]:
+        """İsme birebir (case-insensitive) eşleşen ilk playlist'i getir."""
+        target = (name or "").strip().lower()
+        for it in self._iter_my_playlists():
+            if (it.get("name") or "").strip().lower() == target:
+                return it["id"], it
+        return None
+
+    def upsert_playlist_with_items(self, name: str, public: bool, description: str, uris: List[str], replace: bool = True) -> Tuple[str, bool]:
+        """
+        Aynı isimde playlist varsa:
+          - replace=True -> içeriği tamamen bu uris ile değiştir (güncelle)
+          - replace=False -> var olana ekle
+        Yoksa yeni oluştur.
+        Dönüş: (playlist_id, created_new: bool)
+        """
+        found = self.find_playlist_by_name(name)
+        if found:
+            pid, meta = found
+            # Detayları senkronla (public/description değişmiş olabilir)
+            try:
+                self.sp.playlist_change_details(pid, name=name, public=public, description=description)
+            except Exception as e:
+                logger.warning("playlist_change_details failed: %s", e)
+            if replace:
+                self.replace_items(pid, uris)
+            else:
+                self.add_items_chunked(pid, uris, chunk=100)
+            logger.info("Updated existing playlist: %s (%s)", name, pid)
+            return pid, False
+        else:
+            pid = self.create_playlist(name=name, public=public, description=description)
+            if uris:
+                self.add_items_chunked(pid, uris, chunk=100)
+            return pid, True
+
     # -------------------------------- Search --------------------------------
 
     def _score_candidate(self, cand_title: str, cand_artists: str, want_title: str, want_artist: str, popularity: int) -> float:
@@ -135,7 +192,7 @@ class SpotifyClient:
 
     def _run_query(self, q: str, limit: int = 10):
         try:
-            logger.debug("Spotipy search q=%s", q)
+            logger.debug("Spotipy search q=%s market=%s", q, self.market)
             return self.sp.search(q=q, type="track", limit=limit, market=self.market)
         except spotipy.exceptions.SpotifyException as e:
             if getattr(e, "http_status", None) == 429:
@@ -156,9 +213,11 @@ class SpotifyClient:
         def _queries(t: str) -> List[str]:
             qs: List[str] = []
             if primary:
-                qs.append(f'track:"{t}" artist:"{primary}" year:{year}')
+                if year:
+                    qs.append(f'track:"{t}" artist:"{primary}" year:{year}')
                 qs.append(f'track:"{t}" artist:"{primary}"')
-            qs.append(f'track:"{t}" year:{year}')
+            if year:
+                qs.append(f'track:"{t}" year:{year}')
             qs.append(f'track:"{t}"')
             return qs
 
