@@ -15,10 +15,10 @@ from hitcapsule.artwork import make_cover, make_story_poster
 # ---- Sayfa ayarları ----
 st.set_page_config(page_title="HitCapsule", page_icon="🎵", layout="wide")
 
-# ---- Tabs: underline style (no pill bar) ----
+# ---- Global stiller (tabs + kart + badge + callout) ----
 st.markdown("""
 <style>
-/* bar gibi görünen büyük arka planı tamamen kaldır */
+/* Tabs: üstteki barı kaldır, sadece underline kalsın */
 .stTabs [data-baseweb="tab-list"]{
   background: transparent !important;
   border: 0 !important;
@@ -26,58 +26,67 @@ st.markdown("""
   padding: 0 !important;
   gap: 0 !important;
 }
-
-/* sekmeleri sade text gibi göster */
 .stTabs [data-baseweb="tab"]{
   background: transparent !important;
   border: 0 !important;
   margin: 0 24px 0 0 !important;
   padding: 0 0 10px 0 !important;
 }
-
-/* label renkleri */
 .stTabs [data-baseweb="tab"] p{
   font-weight: 600 !important;
   color: rgba(255,255,255,.65) !important;
   margin: 0 !important;
 }
-
-/* aktif olan sekme */
-.stTabs [aria-selected="true"] p{
-  color: #fff !important;
-}
-
-/* underline (tab-highlight) */
+.stTabs [aria-selected="true"] p{ color:#fff !important; }
 .stTabs [data-baseweb="tab-highlight"]{
-  background-color: #22c55e !important;   /* istersen marka rengine çek */
-  height: 3px !important;
-  border-radius: 0 !important;
+  background-color:#22c55e !important; height:3px !important; border-radius:0 !important;
 }
+
+/* Basit kart / rozet / callout */
+.hc-card{ background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08);
+  border-radius:12px; padding:16px; }
+.hc-badge{ display:inline-block; background:rgba(34,197,94,.12); color:#d1fae5;
+  border:1px solid rgba(34,197,94,.35); padding:6px 10px; border-radius:999px; font-size:0.9rem; }
+.hc-muted{ color:rgba(255,255,255,.65) }
+.hc-callout{ margin-top:8px; padding:12px 14px; border-radius:12px;
+  background:rgba(255,255,255,.03); border:1px dashed rgba(255,255,255,.1); }
 </style>
 """, unsafe_allow_html=True)
 
-
 st.title("HitCapsule — Pick a date. Press play.")
 st.caption("Create a Spotify playlist from the Billboard Hot 100 of any date.")
+
+# Billboard Hot 100 ilk yayın: 1958-08-04 (resmî ilk liste)
+BILLBOARD_START = _date(1958, 8, 4)
+TODAY = _date.today()
 
 # ---- İki kolon düzeni ----
 left, right = st.columns([1, 1])
 
 with left:
     with st.form("controls"):
-        d = st.date_input("Pick a date", value=_date(1997, 3, 6))
+        # Buradaki min/max değerleri “2007 tavanı” sorununu çözer
+        d = st.date_input(
+            "Pick a date",
+            value=_date(1997, 3, 6),
+            min_value=BILLBOARD_START,
+            max_value=TODAY,
+            format="YYYY/MM/DD",
+            help="Billboard Hot 100 started in 1958. You can pick any date up to today."
+        )
         custom_name = st.text_input("Playlist name (optional)", "")
-        market = st.selectbox("Market", ["US", "TR", "GB", "DE", "FR", "BR"], index=0)
+
+        # Market alanı yok — arama bölgesi .env -> SPOTIFY_MARKET (yoksa US)
         make_public = st.checkbox("Create as public", value=False)
         upload_cover = st.checkbox("Upload custom cover (requires extra Spotify scope)", value=False)
-        submitted = st.form_submit_button("Create My Top 100")
+        submitted = st.form_submit_button("Create My Playlist")
 
     # Şık "Tip" kutusu
     st.markdown(
         """
         <div class="hc-callout">
             <b>💡 Tip:</b> <span class="hc-muted">
-            Public seçerseniz liste herkes tarafından görülebilir.
+             If you choose public, your playlist can be seen by everyone.
             </span>
         </div>
         """,
@@ -100,7 +109,8 @@ if submitted:
     year = the_date.split("-")[0]
 
     status.write("Connecting to Spotify…")
-    sp = SpotifyClient(market=market, enable_cover_upload=upload_cover)
+    # Market parametresi kaldırıldı; SpotifyClient env'den (SPOTIFY_MARKET) alacak
+    sp = SpotifyClient(enable_cover_upload=upload_cover)
 
     uris, missing = [], []
     total = max(len(chart), 1)
@@ -122,9 +132,11 @@ if submitted:
     cover_path = os.path.join("artifacts", f"cover_{the_date}.jpg")
     poster_path = os.path.join("artifacts", f"poster_{the_date}.png")
     make_cover(the_date, cover_path, playlist_name=name)
-    # Top 8 + playlist adını postere geçir
+
+    # Poster: Top 8 şarkı + playlist adı
     top8 = [(c.title, c.artist) for c in chart[:8]]
     make_story_poster(the_date, top8, url, poster_path, playlist_name=name, top_k=8)
+
     uploaded = False
     if upload_cover:
         uploaded = sp.upload_cover_image(pid, cover_path)
@@ -148,27 +160,22 @@ with right:
     if not res:
         st.markdown(
             '<div class="hc-card"><b>Ready when you are.</b><br>'
-            '<span class="hc-muted">Pick a date and hit “Create My Top 100”.</span></div>',
+            '<span class="hc-muted">Pick a date and hit “Create My Playlist”.</span></div>',
             unsafe_allow_html=True,
         )
     else:
-        st.markdown('<div class="hc-card">', unsafe_allow_html=True)
-
         tab_sum, tab_poster = st.tabs(["Summary", "Poster"])
         with tab_sum:
-            # Üstte küçük "badge"ler (geniş yeşil bar yerine)
             badges = []
-            if res.get("done"):
-                badges.append("✅ Done")
-            if res.get("uploaded"):
-                badges.append("🟩 Cover uploaded")
+            if res.get("done"): badges.append("✅ Done")
+            if res.get("uploaded"): badges.append("🟩 Cover uploaded")
             if badges:
                 st.markdown(
                     "<div class='hc-badge'>" + " &nbsp;•&nbsp; ".join(badges) + "</div>",
                     unsafe_allow_html=True,
                 )
 
-            st.subheader(res["name"])
+            st.subheader(f'[ {res["name"]} ]')
             st.caption(f'Billboard Hot 100 — {res["date"]}')
             st.link_button("Open on Spotify", res["url"])
 
@@ -178,12 +185,11 @@ with right:
             m3.metric("Time", f"{res['duration']:.1f}s")
 
         with tab_poster:
-            PREVIEW_W = 180  # küçük poster önizleme
+            PREVIEW_W = 180
             st.image(res["poster_path"], caption=f"Poster preview ({PREVIEW_W}px)", width=PREVIEW_W)
             with open(res["poster_path"], "rb") as f:
                 st.download_button("Download poster.png", f, file_name=os.path.basename(res["poster_path"]))
             with st.expander("View full-size poster"):
-                # deprecation fix: use_container_width -> width='stretch'
                 st.image(res["poster_path"], width="stretch")
 
         st.markdown('</div>', unsafe_allow_html=True)
