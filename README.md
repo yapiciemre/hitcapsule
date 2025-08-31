@@ -6,7 +6,6 @@ Create a Spotify playlist from the **Billboard Hot 100** of any date (since 1958
   <em>Pick a date → press Create My Playlist → get a hit 100‑track playlist, a shareable story poster, and an optional custom cover.</em>
 </p>
 
----
 
 ## Screenshots
 
@@ -24,7 +23,6 @@ Create a Spotify playlist from the **Billboard Hot 100** of any date (since 1958
   <img src="screenshots/process_sample.png" alt="Story poster preview" width="800" />
 </p>
 
----
 
 ## Features
 
@@ -38,7 +36,6 @@ Create a Spotify playlist from the **Billboard Hot 100** of any date (since 1958
 
 > ℹ️ Data source is Billboard’s public Hot 100 page. This tool is for personal, non‑commercial use.
 
----
 
 ## Requirements
 
@@ -49,7 +46,6 @@ Create a Spotify playlist from the **Billboard Hot 100** of any date (since 1958
   http://127.0.0.1:8080/callback
   ```
 
----
 
 ## Setup
 
@@ -80,7 +76,6 @@ SPOTIFY_REDIRECT_URI=http://127.0.0.1:8080/callback
 SPOTIFY_MARKET=US
 ```
 
----
 
 ## Run (UI)
 
@@ -96,7 +91,6 @@ streamlit run app.py
 - If a playlist with the same name already exists, the UI **updates** it (replaces items).  
 - “Upload custom cover” requires the `ugc-image-upload` scope the first time you authorize.
 
----
 
 ## Run (CLI)
 
@@ -107,7 +101,6 @@ python -m hitcapsule --date 1997-03-06
 - CLI creates a new playlist named `<date> Billboard Hot 100`.  
 - Bestie Blend is currently UI‑only.
 
----
 
 ## Project Structure
 
@@ -128,7 +121,6 @@ hitcapsule/
       └─ artwork.py           # Poster & cover rendering
 ```
 
----
 
 ## How it works
 
@@ -141,7 +133,6 @@ hitcapsule/
 - Billboard page is in English; there isn’t a country‑specific Hot 100 per date here.  
 - Spotify availability varies by market; set `SPOTIFY_MARKET` in `.env` if needed.
 
----
 
 ## Troubleshooting
 
@@ -150,7 +141,6 @@ hitcapsule/
 - **Nothing happens on “upload cover”**: ensure you granted the additional scope (`ugc-image-upload`).  
 - **`No module named hitcapsule` (CLI)**: run from the project root and `cd src` before `python -m hitcapsule`.
 
----
 
 ## Extensible Roadmap
 
@@ -158,13 +148,11 @@ hitcapsule/
 - More poster themes & brand color customization.  
 - Optional FastAPI backend + lightweight React front‑end.
 
----
 
 ## License
 
 **MIT** — see `LICENSE`.
 
----
 
 ## Credits
 
